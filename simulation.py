@@ -1,19 +1,31 @@
 import pygame
 import random
 
-# Configuración
+# Ancho y alto de la ventana de simulación (en píxeles)
 WIDTH, HEIGHT = 800, 600
+# Fotogramas por segundo cada segundo pasan 30 frames
 FPS = 30
+# Velocidad de movimiento de los conejos
 RABBIT_SPEED = 2
+# Velocidad de movimiento de los zorros
 FOX_SPEED = 3
+# Cada cuántos frames reaparece la comida ej: 10 frames -> 10 fps -> 0.33 segundos
 FOOD_RESPAWN_TIME = 10  # frames
+# Distancia máxima para que dos animales puedan reproducirse
 REPRODUCE_DISTANCE = 15
+# Probabilidad de reproducción por frame para los conejos
 REPRODUCE_PROBABILITY_RABBIT = 0.01
+# Probabilidad de reproducción por frame para los zorros
 REPRODUCE_PROBABILITY_FOX = 0.01
+# Tiempo máximo (en frames) que un zorro puede sobrevivir sin comer
 STARVATION_TIME_FOX = 300
+# Tiempo máximo (en frames) que un conejo puede sobrevivir sin comer
 STARVATION_TIME_RABBIT = 300  # frames
+# Número máximo de conejos permitidos en la simulación
 MAX_RABBITS = 30
+# Número máximo de zorros permitidos en la simulación
 MAX_FOXES = 10
+# Radio de visión para detectar comida o presas
 VISION_RADIUS = 100  # distancia para detectar comida o presas
 
 pygame.init()
@@ -26,12 +38,14 @@ GREEN = (0, 255, 0)
 YELLOW = (255, 255, 0)
 RED = (255, 0, 0)
 
+
 class Food(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         self.image = pygame.Surface((6, 6))
         self.image.fill(GREEN)
         self.rect = self.image.get_rect(center=(random.randint(0, WIDTH), random.randint(0, HEIGHT)))
+
 
 class Rabbit(pygame.sprite.Sprite):
     def __init__(self):
@@ -56,8 +70,6 @@ class Rabbit(pygame.sprite.Sprite):
         self.rect.y += int(dy * RABBIT_SPEED)
         self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
 
-    
-
     def update(self, foods):
         self.age += 1
         self.time_since_food += 1
@@ -73,13 +85,14 @@ class Rabbit(pygame.sprite.Sprite):
         if target:
             dx = target.rect.centerx - self.rect.centerx
             dy = target.rect.centery - self.rect.centery
-            dist = max((dx**2 + dy**2) ** 0.5, 1)
+            dist = max((dx ** 2 + dy ** 2) ** 0.5, 1)
             self.rect.x += int(RABBIT_SPEED * dx / dist)
             self.rect.y += int(RABBIT_SPEED * dy / dist)
         else:
             self.move_randomly()
 
         self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
+
 
 class Fox(pygame.sprite.Sprite):
     def __init__(self):
@@ -103,7 +116,6 @@ class Fox(pygame.sprite.Sprite):
         self.rect.y += int(dy * FOX_SPEED)
         self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
 
-
     def update(self, rabbits):
         self.age += 1
         self.time_since_food += 1
@@ -119,13 +131,14 @@ class Fox(pygame.sprite.Sprite):
         if target:
             dx = target.rect.centerx - self.rect.centerx
             dy = target.rect.centery - self.rect.centery
-            dist = max((dx**2 + dy**2) ** 0.5, 1)
+            dist = max((dx ** 2 + dy ** 2) ** 0.5, 1)
             self.rect.x += int(FOX_SPEED * dx / dist)
             self.rect.y += int(FOX_SPEED * dy / dist)
         else:
             self.move_randomly()
 
         self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
+
 
 # Grupos
 all_sprites = pygame.sprite.Group()
@@ -184,8 +197,9 @@ while running:
                 if other != rabbit:
                     pair = tuple(sorted([id(rabbit), id(other)]))
                     if (pair not in reproduced_pairs_rabbits and
-                        rabbit.rect.colliderect(other.rect.inflate(REPRODUCE_DISTANCE, REPRODUCE_DISTANCE))):
-                        if len(rabbits) + len(rabbits_to_add) < MAX_RABBITS and random.random() < REPRODUCE_PROBABILITY_RABBIT:
+                            rabbit.rect.colliderect(other.rect.inflate(REPRODUCE_DISTANCE, REPRODUCE_DISTANCE))):
+                        if len(rabbits) + len(
+                                rabbits_to_add) < MAX_RABBITS and random.random() < REPRODUCE_PROBABILITY_RABBIT:
                             baby = Rabbit()
                             # Posición aleatoria cercana al padre
                             new_x = min(max(rabbit.rect.centerx + random.randint(-10, 10), 0), WIDTH)
@@ -217,7 +231,7 @@ while running:
                 if other != fox:
                     pair = tuple(sorted([id(fox), id(other)]))
                     if (pair not in reproduced_pairs_foxes and
-                        fox.rect.colliderect(other.rect.inflate(REPRODUCE_DISTANCE, REPRODUCE_DISTANCE))):
+                            fox.rect.colliderect(other.rect.inflate(REPRODUCE_DISTANCE, REPRODUCE_DISTANCE))):
                         if len(foxes) + len(foxes_to_add) < MAX_FOXES and random.random() < REPRODUCE_PROBABILITY_FOX:
                             baby = Fox()
                             new_x = min(max(fox.rect.centerx + random.randint(-10, 10), 0), WIDTH)
