@@ -1,10 +1,12 @@
-import pygame
-import random
 import math
-import numpy as np
-from enum import Enum
+import random
 from collections import deque
 from dataclasses import dataclass
+
+import pygame
+
+from colors import WHITE, GREEN, YELLOW, RED
+from enums import Gender, Season
 
 # Configuración inicial
 pygame.init()
@@ -15,31 +17,6 @@ WIDTH, HEIGHT = 1000, 700
 FPS = 60
 FONT = pygame.font.SysFont('Arial', 14)
 LARGE_FONT = pygame.font.SysFont('Arial', 24)
-
-# Colores
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)
-DARK_GREEN = (0, 100, 0)
-YELLOW = (255, 255, 0)
-ORANGE = (255, 165, 0)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
-BROWN = (139, 69, 19)
-GRAY = (128, 128, 128)
-
-
-# Enums para mejor organización
-class Gender(Enum):
-    MALE = 1
-    FEMALE = 2
-
-
-class Season(Enum):
-    SPRING = 1
-    SUMMER = 2
-    AUTUMN = 3
-    WINTER = 4
 
 
 @dataclass
@@ -424,7 +401,7 @@ class Simulation:
                     continue
 
                 dist_sq = (rabbit1.rect.centerx - rabbit2.rect.centerx) ** 2 + (
-                            rabbit1.rect.centery - rabbit2.rect.centery) ** 2
+                        rabbit1.rect.centery - rabbit2.rect.centery) ** 2
                 if dist_sq < self.params.reproduce_distance ** 2:
                     if random.random() < self.params.rabbit_reproduce_prob:
                         litter_size = random.randint(*self.params.rabbit_litter_size)
