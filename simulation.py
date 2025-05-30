@@ -2,18 +2,17 @@ import math
 import random
 from collections import deque
 from dataclasses import dataclass
+from enums import *
+from colors import *
 
 import pygame
-
-from colors import WHITE, GREEN, YELLOW, RED
-from enums import Gender, Season
 
 # Configuración inicial
 pygame.init()
 pygame.font.init()
 
 # Constantes
-WIDTH, HEIGHT = 1000, 700
+WIDTH, HEIGHT = 1200, 800
 FPS = 60
 FONT = pygame.font.SysFont('Arial', 14)
 LARGE_FONT = pygame.font.SysFont('Arial', 24)
@@ -70,18 +69,22 @@ class Food(pygame.sprite.Sprite):
 
 
 class Animal(pygame.sprite.Sprite):
-    def __init__(self, x, y, gender, color_male, color_female, size, speed):
+    def __init__(self, x, y, gender, color_male, color_female, size, speed, params):
         super().__init__()
         self.gender = gender
         self.age = 0
         self.energy = 100
+        self.health = 100
+        self.sick = False
         self.time_since_food = 0
         self.size = size
-        self.speed = speed
+        self.base_speed = speed
+        self.params = params  # Añadimos params como atributo
         self.direction = [random.uniform(-1, 1), random.uniform(-1, 1)]
         self.change_dir_timer = 0
-        self.memory = deque(maxlen=5)  # Memoria de ubicaciones recientes
-        self.fear = 0  # Nivel de miedo (afecta comportamiento)
+        self.memory = deque(maxlen=5)
+        self.fear = 0
+        self.reproduction_cooldown = 0
 
         # Crear imagen con forma más orgánica
         self.image = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
@@ -96,11 +99,44 @@ class Animal(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.original_image = self.image.copy()
 
+    @property
+    def speed(self):
+        """Velocidad afectada por la salud"""
+        if self.health <= 30:
+            return self.base_speed * 0.5
+        elif self.health <= 50:
+            return self.base_speed * 0.7
+        elif self.health <= 80:
+            return self.base_speed * 0.9
+        return self.base_speed
+
     def rotate_towards_direction(self):
         if self.direction[0] != 0 or self.direction[1] != 0:
             angle = math.degrees(math.atan2(-self.direction[1], self.direction[0])) - 90
             self.image = pygame.transform.rotate(self.original_image, angle)
             self.rect = self.image.get_rect(center=self.rect.center)
+
+    def update_health(self):
+        """Actualiza el estado de salud del animal"""
+        # Si está enfermo, pierde salud
+        if self.sick:
+            self.health -= 10
+            # 50% de probabilidad de curarse
+            if random.random() < 0.5:
+                self.svick = False
+
+        # Si no se alimentó, pierde salud
+        if self.time_since_food >= SimulationParams.day_length:
+            self.health -= 20
+        # Si se alimentó, gana salud
+        elif self.time_since_food == 0:
+            self.health = min(100, self.health + 5)
+
+        # Si la salud llega a cero, muere
+        if self.health <= 0:
+            self.kill()
+            return False
+        return True
 
     def move_randomly(self):
         self.change_dir_timer += 1
@@ -173,94 +209,195 @@ class Animal(pygame.sprite.Sprite):
         return False
 
     def update_energy(self):
-        self.energy -= 0.1
+        """Actualiza la energía considerando la salud"""
+        # Animales enfermos pierden más energía
+        energy_loss = 0.1 * (1.5 if self.sick else 1)
+        self.energy -= energy_loss
         self.time_since_food += 1
         if self.energy <= 0:
             self.kill()
             return False
         return True
 
+    def check_season_sickness(self, season_changed):
+        """Verifica si el animal desarrolla enfermedad al cambiar de estación"""
+        if season_changed and random.random() < 0.01:  # 1% de probabilidad
+            self.sick = True
+
 
 class Rabbit(Animal):
-    def __init__(self, x=None, y=None, gender=None):
+    def __init__(self, x=None, y=None, gender=None, params=None):
         gender = gender or random.choice(list(Gender))
         x = x or random.randint(0, WIDTH)
         y = y or random.randint(0, HEIGHT)
-        color_male = (255, 255, 150)  # Amarillo claro para machos
-        color_female = (255, 220, 150)  # Crema para hembras
-        super().__init__(x, y, gender, color_male, color_female, 8, SimulationParams.rabbit_speed)
+        color_male = (255, 255, 150)
+        color_female = (255, 220, 150)
+        super().__init__(x, y, gender, color_male, color_female, 8, params.rabbit_speed, params)
         self.maturity_age = 100
-        self.reproduction_cooldown = 0
-        self.fear = 0
 
-    def update(self, foods, foxes):
-        if not self.update_energy():
+    def update(self, foods, foxes, all_rabbits):  # Acepta 3 parámetros
+        if not self.update_energy() or not self.update_health():
             return
 
         self.age += 1
         self.reproduction_cooldown = max(0, self.reproduction_cooldown - 1)
         self.fear = max(0, self.fear - 0.5)
 
-        # Comportamiento basado en el miedo
-        if self.fear > 50:
-            # Comportamiento de huida
-            if not self.avoid(foxes, SimulationParams.vision_radius * 1.5):
-                self.move_randomly()
+        # Comportamiento basado en salud
+        if self.health > 70 and self.age >= self.maturity_age and self.reproduction_cooldown == 0:
+            self.seek_mate(all_rabbits)
+        elif self.health > 30:
+            self.seek_food(foods, foxes)
         else:
-            # Buscar comida si la energía es baja o hay comida cerca
-            closest_food = None
-            min_food_dist = float('inf')
-
-            for food in foods:
-                dist_sq = (self.rect.centerx - food.rect.centerx) ** 2 + (self.rect.centery - food.rect.centery) ** 2
-                if dist_sq < SimulationParams.vision_radius ** 2 and dist_sq < min_food_dist:
-                    min_food_dist = dist_sq
-                    closest_food = food
-
-            if closest_food and (self.energy < 70 or min_food_dist < SimulationParams.vision_radius ** 2 // 4):
-                self.move_towards(closest_food)
-            else:
+            if not self.avoid_danger(foxes):
                 self.move_randomly()
 
-        # Detección de depredadores cercanos
+    def seek_mate(self, rabbits):
+        """Busca una pareja para reproducirse"""
+        closest_mate = None
+        min_dist = float('inf')
+
+        for rabbit in rabbits:
+            # Solo considerar conejos del sexo opuesto, maduros y con buena salud
+            if (rabbit.gender != self.gender and
+                    rabbit.age >= rabbit.maturity_age and
+                    rabbit.reproduction_cooldown == 0 and
+                    rabbit.health > 50):
+
+                dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + \
+                          (self.rect.centery - rabbit.rect.centery) ** 2
+
+                if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
+                    min_dist = dist_sq
+                    closest_mate = rabbit
+
+        if closest_mate:
+            self.move_towards(closest_mate)
+        else:
+            self.move_randomly()
+
+    def seek_food(self, foods, foxes):
+        """Busca comida mientras evita peligros"""
+        # Primero verificar peligros cercanos
+        if self.avoid_danger(foxes):
+            return
+
+        # Buscar comida
+        closest_food = None
+        min_food_dist = float('inf')
+
+        for food in foods:
+            dist_sq = (self.rect.centerx - food.rect.centerx) ** 2 + \
+                      (self.rect.centery - food.rect.centery) ** 2
+            if dist_sq < SimulationParams.vision_radius ** 2 and dist_sq < min_food_dist:
+                min_food_dist = dist_sq
+                closest_food = food
+
+        if closest_food:
+            self.move_towards(closest_food)
+        else:
+            self.move_randomly()
+
+    def avoid_danger(self, foxes):
+        """Evita depredadores y devuelve True si detectó peligro"""
         for fox in foxes:
-            dist_sq = (self.rect.centerx - fox.rect.centerx) ** 2 + (self.rect.centery - fox.rect.centery) ** 2
+            dist_sq = (self.rect.centerx - fox.rect.centerx) ** 2 + \
+                      (self.rect.centery - fox.rect.centery) ** 2
             if dist_sq < SimulationParams.vision_radius ** 2:
                 self.fear = min(100, self.fear + 30 * (1 - dist_sq / SimulationParams.vision_radius ** 2))
 
+        if self.fear > 30:
+            return self.avoid(foxes, SimulationParams.vision_radius * 1.5)
+        return False
+
 
 class Fox(Animal):
-    def __init__(self, x=None, y=None, gender=None):
+    def __init__(self, x=None, y=None, gender=None, params=None):
         gender = gender or random.choice(list(Gender))
         x = x or random.randint(0, WIDTH)
         y = y or random.randint(0, HEIGHT)
-        color_male = (200, 50, 50)  # Rojo oscuro para machos
-        color_female = (150, 50, 50)  # Rojo más claro para hembras
-        super().__init__(x, y, gender, color_male, color_female, 12, SimulationParams.fox_speed)
+        color_male = (200, 50, 50)
+        color_female = (150, 50, 50)
+        super().__init__(x, y, gender, color_male, color_female, 12, params.fox_speed, params)
         self.maturity_age = 200
-        self.reproduction_cooldown = 0
 
-    def update(self, rabbits):
-        if not self.update_energy():
+    def update(self, rabbits, all_foxes):  # Acepta 2 parámetros
+        if not self.update_energy() or not self.update_health():
             return
 
         self.age += 1
         self.reproduction_cooldown = max(0, self.reproduction_cooldown - 1)
 
-        # Buscar presas
+        # Comportamiento basado en salud
+        if self.health > 70 and self.age >= self.maturity_age and self.reproduction_cooldown == 0:
+            self.seek_mate(all_foxes)
+        elif self.health > 40:
+            self.hunt(rabbits)
+        else:
+            self.hunt_weak_prey(rabbits)
+
+    def seek_mate(self, foxes):
+        """Busca una pareja para reproducirse"""
+        closest_mate = None
+        min_dist = float('inf')
+
+        for fox in foxes:
+            # Solo considerar zorros del sexo opuesto, maduros y con buena salud
+            if (fox.gender != self.gender and
+                    fox.age >= fox.maturity_age and
+                    fox.reproduction_cooldown == 0 and
+                    fox.health > 50):
+
+                dist_sq = (self.rect.centerx - fox.rect.centerx) ** 2 + \
+                          (self.rect.centery - fox.rect.centery) ** 2
+
+                if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
+                    min_dist = dist_sq
+                    closest_mate = fox
+
+        if closest_mate:
+            self.move_towards(closest_mate)
+        else:
+            self.move_randomly()
+
+    def hunt(self, rabbits):
+        """Caza al conejo más cercano"""
         closest_rabbit = None
-        min_rabbit_dist = float('inf')
+        min_dist = float('inf')
 
         for rabbit in rabbits:
-            dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + (self.rect.centery - rabbit.rect.centery) ** 2
-            if dist_sq < SimulationParams.vision_radius ** 2 and dist_sq < min_rabbit_dist:
-                min_rabbit_dist = dist_sq
+            dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + \
+                      (self.rect.centery - rabbit.rect.centery) ** 2
+            if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
+                min_dist = dist_sq
                 closest_rabbit = rabbit
 
-        if closest_rabbit and (self.energy < 80 or min_rabbit_dist < SimulationParams.vision_radius ** 2 // 4):
+        if closest_rabbit:
             self.move_towards(closest_rabbit)
         else:
             self.move_randomly()
+
+    def hunt_weak_prey(self, rabbits):
+        """Busca conejos enfermos o débiles"""
+        weakest_rabbit = None
+        min_health = float('inf')
+        min_dist = float('inf')
+
+        for rabbit in rabbits:
+            dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + \
+                      (self.rect.centery - rabbit.rect.centery) ** 2
+            if dist_sq < self.params.vision_radius ** 2:
+                # Prefiere conejos con menos salud y más cercanos
+                health_score = rabbit.health * (dist_sq ** 0.5) / 100
+                if health_score < min_health:
+                    min_health = health_score
+                    weakest_rabbit = rabbit
+
+        if weakest_rabbit:
+            self.move_towards(weakest_rabbit)
+        else:
+            # Si no encuentra presas débiles, cazar normalmente
+            self.hunt(rabbits)
 
 
 class Simulation:
@@ -273,7 +410,7 @@ class Simulation:
         self.day_night_cycle = 0
         self.season = Season.SPRING
         self.season_timer = 0
-        self.params = SimulationParams()
+        self.params = SimulationParams()  # Asegurarse que esto está inicializado
 
         # Grupos de sprites
         self.all_sprites = pygame.sprite.LayeredUpdates()
@@ -289,6 +426,24 @@ class Simulation:
         # Inicializar población
         self.initialize_population()
 
+    def add_food(self, x=None, y=None):  # Añadir este método si falta
+        food = Food(x, y)
+        self.foods.add(food)
+        self.all_sprites.add(food)
+        return food
+
+    def add_rabbit(self, x=None, y=None, gender=None):
+        rabbit = Rabbit(x, y, gender, self.params)  # Asegurar que pasamos self.params
+        self.rabbits.add(rabbit)
+        self.all_sprites.add(rabbit)
+        return rabbit
+
+    def add_fox(self, x=None, y=None, gender=None):
+        fox = Fox(x, y, gender, self.params)  # Asegurar que pasamos self.params
+        self.foxes.add(fox)
+        self.all_sprites.add(fox)
+        return fox
+
     def initialize_population(self):
         for _ in range(self.params.initial_rabbits):
             self.add_rabbit()
@@ -297,7 +452,7 @@ class Simulation:
             self.add_fox()
 
         for _ in range(self.params.initial_food):
-            self.add_food()
+            self.add_food()  # Usar add_food en lugar de crear Food directamente
 
     def add_rabbit(self, x=None, y=None, gender=None):
         rabbit = Rabbit(x, y, gender)
@@ -305,17 +460,17 @@ class Simulation:
         self.all_sprites.add(rabbit)
         return rabbit
 
+    def add_rabbit(self, x=None, y=None, gender=None):
+        rabbit = Rabbit(x, y, gender, self.params)  # Pasamos self.params
+        self.rabbits.add(rabbit)
+        self.all_sprites.add(rabbit)
+        return rabbit
+
     def add_fox(self, x=None, y=None, gender=None):
-        fox = Fox(x, y, gender)
+        fox = Fox(x, y, gender, self.params)  # Pasamos self.params
         self.foxes.add(fox)
         self.all_sprites.add(fox)
         return fox
-
-    def add_food(self, x=None, y=None):
-        food = Food(x, y)
-        self.foods.add(food)
-        self.all_sprites.add(food)
-        return food
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -355,13 +510,153 @@ class Simulation:
         self.season_timer = 0
         self.initialize_population()
 
+    def handle_reproduction(self):
+        # Ahora los animales ya buscan parejas activamente,
+        # solo necesitamos manejar la reproducción cuando están cerca
+        for animal in list(self.rabbits) + list(self.foxes):
+            if animal.reproduction_cooldown > 0:
+                continue
+
+            # Buscar parejas cercanas del mismo tipo (rabbits o foxes)
+            group = self.rabbits if isinstance(animal, Rabbit) else self.foxes
+            min_dist = float('inf')
+            mate = None
+
+            for other in group:
+                if (other != animal and
+                        other.gender != animal.gender and
+                        other.age >= other.maturity_age and
+                        other.reproduction_cooldown == 0):
+
+                    dist_sq = (animal.rect.centerx - other.rect.centerx) ** 2 + \
+                              (animal.rect.centery - other.rect.centery) ** 2
+
+                    if dist_sq < self.params.reproduce_distance ** 2 and dist_sq < min_dist:
+                        min_dist = dist_sq
+                        mate = other
+
+            if mate:
+                self.attempt_reproduction(animal, mate)
+
+    def attempt_reproduction(self, animal1, animal2):
+        """Intenta la reproducción entre dos animales"""
+        # Calcular probabilidad basada en salud
+        health_factor = (animal1.health + animal2.health) / 200
+        base_prob = self.params.rabbit_reproduce_prob if isinstance(animal1, Rabbit) else self.params.fox_reproduce_prob
+        prob = base_prob * health_factor
+
+        if random.random() < prob:
+            # Reproducción exitosa
+            litter_size_range = self.params.rabbit_litter_size if isinstance(animal1,
+                                                                             Rabbit) else self.params.fox_litter_size
+            litter_size = random.randint(*litter_size_range)
+
+            group = self.rabbits if isinstance(animal1, Rabbit) else self.foxes
+            max_pop = self.params.max_rabbits if isinstance(animal1, Rabbit) else self.params.max_foxes
+
+            for _ in range(litter_size):
+                if len(group) < max_pop:
+                    x = (animal1.rect.centerx + animal2.rect.centerx) // 2 + random.randint(-10, 10)
+                    y = (animal1.rect.centery + animal2.rect.centery) // 2 + random.randint(-10, 10)
+                    gender = random.choice(list(Gender))
+
+                    if isinstance(animal1, Rabbit):
+                        new_animal = self.add_rabbit(x, y, gender)
+                    else:
+                        new_animal = self.add_fox(x, y, gender)
+
+                    # Heredar enfermedad si alguno de los padres está enfermo
+                    if animal1.sick or animal2.sick:
+                        new_animal.sick = True
+                        new_animal.health = min(animal1.health, animal2.health) * 0.8
+
+            # Configurar cooldown de reproducción
+            animal1.reproduction_cooldown = 100 if isinstance(animal1, Rabbit) else 200
+            animal2.reproduction_cooldown = 100 if isinstance(animal2, Rabbit) else 200
+
+            # Reducir energía por reproducción
+            animal1.energy -= 20
+            animal2.energy -= 20
+
+            # Contagio de enfermedades
+            if animal1.sick and not animal2.sick:
+                animal2.sick = True
+            elif animal2.sick and not animal1.sick:
+                animal1.sick = True
+        # Reproducción de conejos
+        reproduced_pairs = set()
+        rabbits_list = list(self.rabbits)
+
+        for i, rabbit1 in enumerate(rabbits_list):
+            # Nueva condición: salud afecta reproducción
+            health_factor = self.get_reproduction_probability(rabbit1.health)
+            if (rabbit1.age < rabbit1.maturity_age or rabbit1.reproduction_cooldown > 0 or
+                    rabbit1.energy < 60 or len(self.rabbits) >= self.params.max_rabbits or
+                    health_factor <= 0):
+                continue
+
+            for j, rabbit2 in enumerate(rabbits_list[i + 1:], i + 1):
+                health_factor2 = self.get_reproduction_probability(rabbit2.health)
+                if (rabbit2.age < rabbit2.maturity_age or rabbit2.reproduction_cooldown > 0 or
+                        rabbit2.energy < 60 or rabbit1.gender == rabbit2.gender or
+                        health_factor2 <= 0):
+                    continue
+
+                pair = frozenset({id(rabbit1), id(rabbit2)})
+                if pair in reproduced_pairs:
+                    continue
+
+                dist_sq = (rabbit1.rect.centerx - rabbit2.rect.centerx) ** 2 + (
+                        rabbit1.rect.centery - rabbit2.rect.centery) ** 2
+                if dist_sq < self.params.reproduce_distance ** 2:
+                    # Probabilidad de reproducción afectada por salud
+                    prob = self.params.rabbit_reproduce_prob * (health_factor + health_factor2) / 2
+                    if random.random() < prob:
+                        litter_size = random.randint(*self.params.rabbit_litter_size)
+                        for _ in range(litter_size):
+                            if len(self.rabbits) < self.params.max_rabbits:
+                                x = (rabbit1.rect.centerx + rabbit2.rect.centerx) // 2 + random.randint(-10, 10)
+                                y = (rabbit1.rect.centery + rabbit2.rect.centery) // 2 + random.randint(-10, 10)
+                                gender = random.choice(list(Gender))
+                                new_rabbit = self.add_rabbit(x, y, gender)
+                                # Los hijos heredan la enfermedad de los padres
+                                if rabbit1.sick or rabbit2.sick:
+                                    new_rabbit.sick = True
+                                    new_rabbit.health = min(rabbit1.health, rabbit2.health)
+
+                        rabbit1.reproduction_cooldown = 100
+                        rabbit2.reproduction_cooldown = 100
+                        rabbit1.energy -= 20
+                        rabbit2.energy -= 20
+                        # La pareja se contagia si uno está enfermo
+                        if rabbit1.sick and not rabbit2.sick:
+                            rabbit2.sick = True
+                        elif rabbit2.sick and not rabbit1.sick:
+                            rabbit1.sick = True
+                        reproduced_pairs.add(pair)
+                        break
+
+    def get_reproduction_probability(self, health):
+        """Devuelve el factor de probabilidad de reproducción basado en la salud"""
+        if health > 80:
+            return 1.0  # 100% de probabilidad base
+        elif health > 50:
+            return 0.7  # 70% de probabilidad base
+        elif health > 30:
+            return 0.4  # 40% de probabilidad base
+        elif health > 0:
+            return 0.1  # 10% de probabilidad base
+        return 0.0  # No se reproduce
+
     def update_season(self):
+        season_changed = False
         self.season_timer += 1
         if self.season_timer > self.params.season_length:
             self.season_timer = 0
             seasons = list(Season)
             current_idx = seasons.index(self.season)
             self.season = seasons[(current_idx + 1) % len(seasons)]
+            season_changed = True
 
             # Ajustar parámetros según la estación
             if self.season == Season.SPRING:
@@ -376,6 +671,9 @@ class Simulation:
             elif self.season == Season.WINTER:
                 self.params.rabbit_reproduce_prob = 0.02
                 self.params.food_respawn_rate = 1
+        if season_changed:
+            for animal in list(self.rabbits) + list(self.foxes):
+                animal.check_season_sickness(season_changed)
 
     def update_day_night_cycle(self):
         self.day_night_cycle = (self.day_night_cycle + 0.5) % 360
@@ -505,7 +803,7 @@ class Simulation:
 
         # Textos informativos
         texts = [
-            f"Cones: {len(self.rabbits)}",
+            f"Conejos: {len(self.rabbits)}",
             f"Zorros: {len(self.foxes)}",
             f"Comida: {len(self.foods)}",
             f"Estación: {self.season.name}",
@@ -566,7 +864,7 @@ class Simulation:
             pygame.draw.rect(self.screen, RED, (graph_x + 10, graph_y + 30, 10, 10))
             pygame.draw.rect(self.screen, GREEN, (graph_x + 10, graph_y + 50, 10, 10))
 
-            self.screen.blit(FONT.render("Cones", True, WHITE), (graph_x + 25, graph_y + 8))
+            self.screen.blit(FONT.render("Conejos", True, WHITE), (graph_x + 25, graph_y + 8))
             self.screen.blit(FONT.render("Zorros", True, WHITE), (graph_x + 25, graph_y + 28))
             self.screen.blit(FONT.render("Comida", True, WHITE), (graph_x + 25, graph_y + 48))
 
@@ -606,16 +904,15 @@ class Simulation:
                 self.update_day_night_cycle()
                 self.update_season()
 
-                # Actualizar entidades
+                # Actualizar conejos con 3 parámetros
                 for rabbit in self.rabbits:
-                    rabbit.update(self.foods, self.foxes)
+                    rabbit.update(self.foods, self.foxes, self.rabbits)
 
+                # Actualizar zorros con 2 parámetros
                 for fox in self.foxes:
-                    fox.update(self.rabbits)
+                    fox.update(self.rabbits, self.foxes)
 
                 self.foods.update()
-
-                # Manejar interacciones
                 self.handle_feeding()
                 self.handle_reproduction()
                 self.spawn_food()
