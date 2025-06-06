@@ -1019,163 +1019,24 @@ class Simulation:
         pygame.quit()
 
 
-class StartScreen:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-        self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("Simulación Ecosistema - Configuración Inicial")
-
-        # Fuentes
-        self.title_font = pygame.font.SysFont('Arial', 40)
-        self.label_font = pygame.font.SysFont('Arial', 24)
-        self.button_font = pygame.font.SysFont('Arial', 28)
-
-        # Colores
-        self.background = (240, 240, 240)
-        self.title_color = (50, 50, 150)
-        self.label_color = (70, 70, 70)
-        self.button_color = (100, 200, 100)
-        self.button_hover = (120, 220, 120)
-        self.input_bg = (255, 255, 255)
-        self.input_border = (200, 200, 200)
-        self.input_text = (0, 0, 0)
-
-        # Parámetros configurables
-        self.params = {
-            "initial_rabbits": 50,
-            "initial_foxes": 6,
-            "initial_food": 100,
-            "rabbit_speed": 1.5,
-            "fox_speed": 2.2,
-            "food_respawn_rate": 2,
-            "max_rabbits": 300,
-            "max_foxes": 50
-        }
-
-        # Elementos de la interfaz
-        self.input_rects = {}
-        self.active_input = None
-        self.start_button = pygame.Rect(width // 2 - 100, height - 80, 200, 50)
-
-    def draw_input_field(self, label, value, y_pos, param_name):
-        # Dibuja etiqueta
-        label_surface = self.label_font.render(label, True, self.label_color)
-        self.screen.blit(label_surface, (50, y_pos))
-
-        # Dibuja campo de entrada
-        input_rect = pygame.Rect(300, y_pos, 150, 30)
-        self.input_rects[param_name] = input_rect
-
-        # Resalta el campo activo
-        if self.active_input == param_name:
-            border_color = (0, 120, 215)
-        else:
-            border_color = self.input_border
-
-        pygame.draw.rect(self.screen, border_color, input_rect, 2)
-        pygame.draw.rect(self.screen, self.input_bg, input_rect.inflate(-4, -4))
-
-        # Dibuja el valor
-        value_surface = self.label_font.render(str(value), True, self.input_text)
-        self.screen.blit(value_surface, (input_rect.x + 10, input_rect.y + 5))
-
-    def draw(self):
-        self.screen.fill(self.background)
-
-        # Título
-        title = self.title_font.render("Configuración de la Simulación", True, self.title_color)
-        self.screen.blit(title, (self.width // 2 - title.get_width() // 2, 30))
-
-        # Campos de entrada
-        y_pos = 100
-        self.draw_input_field("Conejos iniciales:", self.params["initial_rabbits"], y_pos, "initial_rabbits")
-        y_pos += 50
-        self.draw_input_field("Zorros iniciales:", self.params["initial_foxes"], y_pos, "initial_foxes")
-        y_pos += 50
-        self.draw_input_field("Comida inicial:", self.params["initial_food"], y_pos, "initial_food")
-        y_pos += 50
-        self.draw_input_field("Velocidad conejos:", self.params["rabbit_speed"], y_pos, "rabbit_speed")
-        y_pos += 50
-        self.draw_input_field("Velocidad zorros:", self.params["fox_speed"], y_pos, "fox_speed")
-        y_pos += 50
-        self.draw_input_field("Tasa de comida:", self.params["food_respawn_rate"], y_pos, "food_respawn_rate")
-        y_pos += 50
-        self.draw_input_field("Máx. conejos:", self.params["max_rabbits"], y_pos, "max_rabbits")
-        y_pos += 50
-        self.draw_input_field("Máx. zorros:", self.params["max_foxes"], y_pos, "max_foxes")
-
-        # Botón de inicio
-        button_color = self.button_hover if self.start_button.collidepoint(
-            pygame.mouse.get_pos()) else self.button_color
-        pygame.draw.rect(self.screen, button_color, self.start_button, border_radius=5)
-        start_text = self.button_font.render("Iniciar Simulación", True, (255, 255, 255))
-        self.screen.blit(start_text, (self.start_button.x + self.start_button.width // 2 - start_text.get_width() // 2,
-                                      self.start_button.y + self.start_button.height // 2 - start_text.get_height() // 2))
-
-        pygame.display.flip()
-
-    def handle_events(self):
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                pygame.quit()
-                sys.exit()
-
-            elif event.type == MOUSEBUTTONDOWN:
-                if event.button == 1:  # Click izquierdo
-                    # Verificar clic en campos de entrada
-                    self.active_input = None
-                    for param_name, rect in self.input_rects.items():
-                        if rect.collidepoint(event.pos):
-                            self.active_input = param_name
-                            break
-
-                    # Verificar clic en botón de inicio
-                    if self.start_button.collidepoint(event.pos):
-                        return self.params  # Devuelve los parámetros configurados
-
-            elif event.type == KEYDOWN:
-                if self.active_input:
-                    # Manejar entrada de texto
-                    if event.key == K_RETURN:
-                        self.active_input = None
-                    elif event.key == K_BACKSPACE:
-                        current = str(self.params[self.active_input])
-                        self.params[self.active_input] = current[:-1] if len(current) > 1 else 0
-                    else:
-                        # Solo permitir números y punto decimal
-                        if event.unicode.isdigit() or (
-                                event.unicode == '.' and '.' not in str(self.params[self.active_input])):
-                            current = str(self.params[self.active_input])
-                            if current == '0':
-                                self.params[self.active_input] = event.unicode
-                            else:
-                                self.params[self.active_input] = current + event.unicode
-
-                            # Convertir a int o float según corresponda
-                            try:
-                                if '.' in str(self.params[self.active_input]):
-                                    self.params[self.active_input] = float(self.params[self.active_input])
-                                else:
-                                    self.params[self.active_input] = int(self.params[self.active_input])
-                            except ValueError:
-                                self.params[self.active_input] = 0
-
-        return None
-
-
 def show_start_screen():
-    pygame.init()
-    start_screen = StartScreen(800, 600)
-
-    while True:
-        params = start_screen.handle_events()
-        if params is not None:
-            # No llamar a pygame.quit() aquí, solo retornar los parámetros
-            return params
-
-        start_screen.draw()
-        pygame.time.Clock().tick(30)
+    default_params = {
+        "initial_rabbits": 50,
+        "initial_foxes": 6,
+        "initial_food": 100,
+        "rabbit_speed": 1.5,
+        "fox_speed": 2.2,
+        "food_respawn_rate": 2,
+        "max_rabbits": 300,
+        "max_foxes": 50
+    }
+    
+    try:
+        from config_window import show_config_window
+        return show_config_window(default_params)
+    except ImportError as e:
+        print(f"Error: No se pudo cargar la ventana de configuración. Usando valores por defecto. Error: {e}")
+        return default_params
 
 
 # Modificación en el main para usar la pantalla de inicio

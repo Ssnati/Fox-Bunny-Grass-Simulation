@@ -1,0 +1,10 @@
+{
+    "initial_rabbits": 50,
+    "initial_foxes": 6,
+    "initial_food": 100,
+    "rabbit_speed": 1.5,
+    "fox_speed": 2.2,
+    "food_respawn_rate": 2,
+    "max_rabbits": 300,
+    "max_foxes": 50
+}
