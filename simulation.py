@@ -1,11 +1,11 @@
-import math
+import pygame
 import random
+import math
+import numpy as np
+from enum import Enum
 from collections import deque
 from dataclasses import dataclass
-from enums import *
-from colors import *
-
-import pygame
+import random_generator
 
 # Configuración inicial
 pygame.init()
@@ -17,14 +17,41 @@ FPS = 60
 FONT = pygame.font.SysFont('Arial', 14)
 LARGE_FONT = pygame.font.SysFont('Arial', 24)
 
+# Colores
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+GREEN = (0, 255, 0)
+DARK_GREEN = (0, 100, 0)
+YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+BROWN = (139, 69, 19)
+GRAY = (128, 128, 128)
+
+
+# Enums para mejor organización
+class Gender(Enum):
+    MALE = 1
+    FEMALE = 2
+
+
+class Season(Enum):
+    SPRING = 1
+    SUMMER = 2
+    AUTUMN = 3
+    WINTER = 4
+
 
 @dataclass
 class SimulationParams:
     rabbit_speed: float = 1.5
-    fox_speed: float = 2.5
-    food_respawn_rate: int = 5
+    fox_speed: float = 2.2
+    food_respawn_rate: int = 2
+    food_respawn_rate_base: int = 2
     reproduce_distance: int = 20
-    rabbit_reproduce_prob: float = 0.08
+    rabbit_reproduce_prob: float = 0.01
+    rabbit_reproduce_prob_base: float = 0.01
     fox_reproduce_prob: float = 0.03
     rabbit_starvation_time: int = 400
     fox_starvation_time: int = 500
@@ -34,20 +61,19 @@ class SimulationParams:
     rabbit_litter_size: tuple = (2, 8)
     fox_litter_size: tuple = (1, 4)
     initial_rabbits: int = 50
-    initial_foxes: int = 10
+    initial_foxes: int = 6
     initial_food: int = 100
     day_length: int = 300  # frames
     season_length: int = 1200  # frames
 
 
 class Food(pygame.sprite.Sprite):
-    def __init__(self, x=None, y=None):
+    def __init__(self, x=None, y=None, ms_rng=None):
         super().__init__()
         self.size = random.randint(3, 8)
         self.nutrition = self.size * 2
         self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
 
-        # Variedad de colores para la comida
         food_color = random.choice([
             (0, 200, 0),
             (50, 150, 50),
@@ -57,7 +83,17 @@ class Food(pygame.sprite.Sprite):
         pygame.draw.circle(self.image, food_color, (self.size // 2, self.size // 2), self.size // 2)
 
         if x is None or y is None:
-            x, y = random.randint(0, WIDTH), random.randint(0, HEIGHT)
+            x_data = ms_rng.pop_last()
+            y_data = ms_rng.pop_last()
+
+            if x_data and y_data:
+                _, norm_x = x_data
+                _, norm_y = y_data
+                x = int(norm_x * WIDTH)
+                y = int(norm_y * HEIGHT)
+            else:
+                x = random.randint(0, WIDTH)
+                y = random.randint(0, HEIGHT)
         self.rect = self.image.get_rect(center=(x, y))
         self.age = 0
         self.lifespan = random.randint(500, 1000)
@@ -69,7 +105,7 @@ class Food(pygame.sprite.Sprite):
 
 
 class Animal(pygame.sprite.Sprite):
-    def __init__(self, x, y, gender, color_male, color_female, size, speed, params):
+    def __init__(self, x, y, gender, color_male, color_female, size, speed, params, rng):
         super().__init__()
         self.gender = gender
         self.age = 0
@@ -85,6 +121,7 @@ class Animal(pygame.sprite.Sprite):
         self.memory = deque(maxlen=5)
         self.fear = 0
         self.reproduction_cooldown = 0
+        self.rng = rng 
 
         # Crear imagen con forma más orgánica
         self.image = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
@@ -98,7 +135,8 @@ class Animal(pygame.sprite.Sprite):
 
         self.rect = self.image.get_rect(center=(x, y))
         self.original_image = self.image.copy()
-
+        
+        
     @property
     def speed(self):
         """Velocidad afectada por la salud"""
@@ -109,29 +147,30 @@ class Animal(pygame.sprite.Sprite):
         elif self.health <= 80:
             return self.base_speed * 0.9
         return self.base_speed
-
     def rotate_towards_direction(self):
         if self.direction[0] != 0 or self.direction[1] != 0:
             angle = math.degrees(math.atan2(-self.direction[1], self.direction[0])) - 90
             self.image = pygame.transform.rotate(self.original_image, angle)
             self.rect = self.image.get_rect(center=self.rect.center)
-
     def update_health(self):
         """Actualiza el estado de salud del animal"""
         # Si está enfermo, pierde salud
         if self.sick:
-            self.health -= 10
-            # 50% de probabilidad de curarse
-            if random.random() < 0.5:
-                self.svick = False
-
-        # Si no se alimentó, pierde salud
-        if self.time_since_food >= SimulationParams.day_length:
-            self.health -= 20
-        # Si se alimentó, gana salud
-        elif self.time_since_food == 0:
-            self.health = min(100, self.health + 5)
-
+            self.health -= 0.5  # Reducir la cantidad para que no sea tan drástico
+            # 20% de probabilidad de curarse cada frame
+            if random.random() < 0.2:
+                self.sick = False
+        
+        # Pérdida de salud gradual por no comer
+        if self.time_since_food > self.params.day_length // 8:  # Mitad del día sin comer
+            self.health -= 0.1
+        elif self.time_since_food > self.params.day_length // 8:  # Un cuarto del día sin comer
+            self.health -= 0.1
+        
+        # Ganar salud al comer
+        if self.time_since_food == 0:
+            self.health = min(100, self.health + 2)  # Aumentar más gradualmente
+        
         # Si la salud llega a cero, muere
         if self.health <= 0:
             self.kill()
@@ -140,10 +179,22 @@ class Animal(pygame.sprite.Sprite):
 
     def move_randomly(self):
         self.change_dir_timer += 1
+
+        # Usamos un número pseudoaleatorio para decidir si cambiar dirección
+        pop_result = self.rng.pop_last()  # puede ser (ni, ri, xi) o (original, normalized)
+
+        # Si no hay números disponibles, usamos random como respaldo
+        rand_val = pop_result[2] if pop_result else random.random()
+
         if self.change_dir_timer > 30 or random.random() < 0.05:
-            # Cambio de dirección más suave
-            self.direction[0] += random.uniform(-0.5, 0.5)
-            self.direction[1] += random.uniform(-0.5, 0.5)
+            # Otro par de valores para dirección, o fallback
+            dx = self.rng.pop_last()
+            dy = self.rng.pop_last()
+            dx_val = dx[1] if dx else random.uniform(-0.5, 0.5)
+            dy_val = dy[1] if dy else random.uniform(-0.5, 0.5)
+
+            self.direction[0] += dx_val * 1.0 - 0.5  # Escala para rango [-0.5, 0.5]
+            self.direction[1] += dy_val * 1.0 - 0.5
 
             # Normalizar dirección
             length = math.sqrt(self.direction[0] ** 2 + self.direction[1] ** 2)
@@ -153,11 +204,14 @@ class Animal(pygame.sprite.Sprite):
 
             self.change_dir_timer = 0
 
-        # Movimiento con inercia
-        self.rect.x += int(self.direction[0] * self.speed * (1 + 0.5 * random.random()))
-        self.rect.y += int(self.direction[1] * self.speed * (1 + 0.5 * random.random()))
+        # Movimiento con inercia (usamos otro número como factor aleatorio)
+        inertia_factor = self.rng.pop_last()
+        inertia = 1 + 0.5 * (inertia_factor[1] if inertia_factor else random.random())
 
-        # Rebote en bordes con cambio de dirección
+        self.rect.x += int(self.direction[0] * self.speed * inertia)
+        self.rect.y += int(self.direction[1] * self.speed * inertia)
+
+        # Rebote en bordes
         if self.rect.left < 0 or self.rect.right > WIDTH:
             self.direction[0] *= -1
         if self.rect.top < 0 or self.rect.bottom > HEIGHT:
@@ -213,7 +267,7 @@ class Animal(pygame.sprite.Sprite):
         # Animales enfermos pierden más energía
         energy_loss = 0.1 * (1.5 if self.sick else 1)
         self.energy -= energy_loss
-        self.time_since_food += 1
+        self.time_since_food += 1  # Esto ya está bien
         if self.energy <= 0:
             self.kill()
             return False
@@ -221,19 +275,20 @@ class Animal(pygame.sprite.Sprite):
 
     def check_season_sickness(self, season_changed):
         """Verifica si el animal desarrolla enfermedad al cambiar de estación"""
-        if season_changed and random.random() < 0.01:  # 1% de probabilidad
+        if season_changed and random.random() < 0.1:  # 1% de probabilidad
             self.sick = True
+    
 
 
 class Rabbit(Animal):
-    def __init__(self, x=None, y=None, gender=None, params=None):
+    def __init__(self, x=None, y=None, gender=None, params=None, rng= None):
         gender = gender or random.choice(list(Gender))
         x = x or random.randint(0, WIDTH)
         y = y or random.randint(0, HEIGHT)
         color_male = (255, 255, 150)
         color_female = (255, 220, 150)
-        super().__init__(x, y, gender, color_male, color_female, 8, params.rabbit_speed, params)
-        self.maturity_age = 100
+        super().__init__(x, y, gender, color_male, color_female, 8, params.rabbit_speed, params, rng)
+        self.maturity_age = 500
 
     def update(self, foods, foxes, all_rabbits):  # Acepta 3 parámetros
         if not self.update_energy() or not self.update_health():
@@ -256,21 +311,21 @@ class Rabbit(Animal):
         """Busca una pareja para reproducirse"""
         closest_mate = None
         min_dist = float('inf')
-
+        
         for rabbit in rabbits:
             # Solo considerar conejos del sexo opuesto, maduros y con buena salud
-            if (rabbit.gender != self.gender and
-                    rabbit.age >= rabbit.maturity_age and
-                    rabbit.reproduction_cooldown == 0 and
-                    rabbit.health > 50):
-
+            if (rabbit.gender != self.gender and 
+                rabbit.age >= rabbit.maturity_age and 
+                rabbit.reproduction_cooldown == 0 and
+                rabbit.health > 50):
+                
                 dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + \
-                          (self.rect.centery - rabbit.rect.centery) ** 2
-
+                            (self.rect.centery - rabbit.rect.centery) ** 2
+                
                 if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
                     min_dist = dist_sq
                     closest_mate = rabbit
-
+        
         if closest_mate:
             self.move_towards(closest_mate)
         else:
@@ -281,14 +336,14 @@ class Rabbit(Animal):
         # Primero verificar peligros cercanos
         if self.avoid_danger(foxes):
             return
-
+            
         # Buscar comida
         closest_food = None
         min_food_dist = float('inf')
 
         for food in foods:
             dist_sq = (self.rect.centerx - food.rect.centerx) ** 2 + \
-                      (self.rect.centery - food.rect.centery) ** 2
+                        (self.rect.centery - food.rect.centery) ** 2
             if dist_sq < SimulationParams.vision_radius ** 2 and dist_sq < min_food_dist:
                 min_food_dist = dist_sq
                 closest_food = food
@@ -302,23 +357,22 @@ class Rabbit(Animal):
         """Evita depredadores y devuelve True si detectó peligro"""
         for fox in foxes:
             dist_sq = (self.rect.centerx - fox.rect.centerx) ** 2 + \
-                      (self.rect.centery - fox.rect.centery) ** 2
+                        (self.rect.centery - fox.rect.centery) ** 2
             if dist_sq < SimulationParams.vision_radius ** 2:
                 self.fear = min(100, self.fear + 30 * (1 - dist_sq / SimulationParams.vision_radius ** 2))
-
+        
         if self.fear > 30:
             return self.avoid(foxes, SimulationParams.vision_radius * 1.5)
         return False
 
-
 class Fox(Animal):
-    def __init__(self, x=None, y=None, gender=None, params=None):
+    def __init__(self, x=None, y=None, gender=None, params=None, rng =None):
         gender = gender or random.choice(list(Gender))
         x = x or random.randint(0, WIDTH)
         y = y or random.randint(0, HEIGHT)
         color_male = (200, 50, 50)
         color_female = (150, 50, 50)
-        super().__init__(x, y, gender, color_male, color_female, 12, params.fox_speed, params)
+        super().__init__(x, y, gender, color_male, color_female, 12, params.fox_speed, params, rng)
         self.maturity_age = 200
 
     def update(self, rabbits, all_foxes):  # Acepta 2 parámetros
@@ -340,21 +394,21 @@ class Fox(Animal):
         """Busca una pareja para reproducirse"""
         closest_mate = None
         min_dist = float('inf')
-
+        
         for fox in foxes:
             # Solo considerar zorros del sexo opuesto, maduros y con buena salud
-            if (fox.gender != self.gender and
-                    fox.age >= fox.maturity_age and
-                    fox.reproduction_cooldown == 0 and
-                    fox.health > 50):
-
+            if (fox.gender != self.gender and 
+                fox.age >= fox.maturity_age and 
+                fox.reproduction_cooldown == 0 and
+                fox.health > 50):
+                
                 dist_sq = (self.rect.centerx - fox.rect.centerx) ** 2 + \
                           (self.rect.centery - fox.rect.centery) ** 2
-
+                
                 if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
                     min_dist = dist_sq
                     closest_mate = fox
-
+        
         if closest_mate:
             self.move_towards(closest_mate)
         else:
@@ -367,7 +421,7 @@ class Fox(Animal):
 
         for rabbit in rabbits:
             dist_sq = (self.rect.centerx - rabbit.rect.centerx) ** 2 + \
-                      (self.rect.centery - rabbit.rect.centery) ** 2
+                    (self.rect.centery - rabbit.rect.centery) ** 2
             if dist_sq < self.params.vision_radius ** 2 and dist_sq < min_dist:
                 min_dist = dist_sq
                 closest_rabbit = rabbit
@@ -399,18 +453,27 @@ class Fox(Animal):
             # Si no encuentra presas débiles, cazar normalmente
             self.hunt(rabbits)
 
-
 class Simulation:
-    def __init__(self):
+    def __init__(self, initial_params=None):
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
+        self.rng = random_generator.LCG(1664525, random.randint(0, 2**32 - 1), 2**32, 1013904223, 0, 1)
+        self.ms_rng = random_generator.MiddleSquare(number=84930271, digits=8, count=10000)
+        self.data = self.rng.ri_list.copy()  
+        self.datams_rng = self.ms_rng.normalized_list.copy()
         self.running = True
         self.paused = False
         self.show_stats = True
         self.day_night_cycle = 0
         self.season = Season.SPRING
         self.season_timer = 0
-        self.params = SimulationParams()  # Asegurarse que esto está inicializado
+        # Inicializar parámetros con valores por defecto o los proporcionados
+        self.params = SimulationParams()
+        if initial_params:
+            for param, value in initial_params.items():
+                if hasattr(self.params, param):
+                    setattr(self.params, param, value)
+
 
         # Grupos de sprites
         self.all_sprites = pygame.sprite.LayeredUpdates()
@@ -426,20 +489,73 @@ class Simulation:
         # Inicializar población
         self.initialize_population()
 
+    def run_statistical_tests(self, method):
+        import tkinter as tk
+        from tkinter import ttk
+        from proofs import ChiSquare, KS
+
+        # Extraer datos del generador
+        if method == 'LCG':
+            data = self.data
+        elif method == 'MiddleSquare':
+            data = self.datams_rng
+        # Ejecutar pruebas
+        chi = ChiSquare(data)
+        chi.create_intervals()
+        chi.calculate_frequence()
+        chi.calculate_squ_chi()
+
+        ks = KS(data)
+        ks.create_intervals()
+        ks.calculate_frequence_obtained()
+        ks.calculate_frequence_obtained_acumulated()
+        ks.calculate_dm()
+
+        chi_passed = chi.squ_chi < chi.squ_chi_critic
+        ks_passed = ks.dm_calculated < ks.dm_critic
+
+        # Crear ventana de resultados con Tkinter
+        result_window = tk.Tk()
+        result_window.title("Resultados Pruebas Estadísticas")
+        result_window.geometry("500x300")
+        result_window.resizable(False, False)
+
+        # Texto de resultados
+        results = [
+            "RESULTADOS DE LAS PRUEBAS",
+            "",
+            f"Chi-Cuadrado: {chi.squ_chi:.4f} (crítico: {chi.squ_chi_critic:.4f})",
+            "✔️ Aceptado" if chi_passed else "❌ Rechazado",
+            "",
+            f"KS DM: {ks.dm_calculated:.4f} (crítico: {ks.dm_critic:.4f})",
+            "✔️ Aceptado" if ks_passed else "❌ Rechazado",
+            "",
+            "Cierra esta ventana para continuar..."
+        ]
+
+        # Crear etiquetas
+        for line in results:
+            label = ttk.Label(result_window, text=line, font=("Arial", 12))
+            label.pack(pady=2)
+
+        # Ejecutar ventana
+        result_window.mainloop()
+
+
     def add_food(self, x=None, y=None):  # Añadir este método si falta
-        food = Food(x, y)
+        food = Food(x, y, self.ms_rng) 
         self.foods.add(food)
         self.all_sprites.add(food)
         return food
 
     def add_rabbit(self, x=None, y=None, gender=None):
-        rabbit = Rabbit(x, y, gender, self.params)  # Asegurar que pasamos self.params
+        rabbit = Rabbit(x, y, gender, self.params, self.rng)  # Asegurar que pasamos self.params
         self.rabbits.add(rabbit)
         self.all_sprites.add(rabbit)
         return rabbit
 
     def add_fox(self, x=None, y=None, gender=None):
-        fox = Fox(x, y, gender, self.params)  # Asegurar que pasamos self.params
+        fox = Fox(x, y, gender, self.params, self.rng)  # Asegurar que pasamos self.params
         self.foxes.add(fox)
         self.all_sprites.add(fox)
         return fox
@@ -453,24 +569,6 @@ class Simulation:
 
         for _ in range(self.params.initial_food):
             self.add_food()  # Usar add_food en lugar de crear Food directamente
-
-    def add_rabbit(self, x=None, y=None, gender=None):
-        rabbit = Rabbit(x, y, gender)
-        self.rabbits.add(rabbit)
-        self.all_sprites.add(rabbit)
-        return rabbit
-
-    def add_rabbit(self, x=None, y=None, gender=None):
-        rabbit = Rabbit(x, y, gender, self.params)  # Pasamos self.params
-        self.rabbits.add(rabbit)
-        self.all_sprites.add(rabbit)
-        return rabbit
-
-    def add_fox(self, x=None, y=None, gender=None):
-        fox = Fox(x, y, gender, self.params)  # Pasamos self.params
-        self.foxes.add(fox)
-        self.all_sprites.add(fox)
-        return fox
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -492,6 +590,12 @@ class Simulation:
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Click izquierdo - añadir conejo
                     self.add_rabbit(*event.pos)
+                    if self.lcg_button_rect.collidepoint(event.pos):
+                        self.run_statistical_tests("LCG")
+                    elif self.msq_button_rect.collidepoint(event.pos):
+                        self.run_statistical_tests("MiddleSquare")
+                    else:
+                        self.add_rabbit(*event.pos)
                 elif event.button == 3:  # Click derecho - añadir zorro
                     self.add_fox(*event.pos)
                 elif event.button == 2:  # Click medio - añadir comida
@@ -509,32 +613,31 @@ class Simulation:
         self.season = Season.SPRING
         self.season_timer = 0
         self.initialize_population()
-
     def handle_reproduction(self):
-        # Ahora los animales ya buscan parejas activamente,
+        # Ahora los animales ya buscan parejas activamente, 
         # solo necesitamos manejar la reproducción cuando están cerca
         for animal in list(self.rabbits) + list(self.foxes):
             if animal.reproduction_cooldown > 0:
                 continue
-
+                
             # Buscar parejas cercanas del mismo tipo (rabbits o foxes)
             group = self.rabbits if isinstance(animal, Rabbit) else self.foxes
             min_dist = float('inf')
             mate = None
-
+            
             for other in group:
-                if (other != animal and
-                        other.gender != animal.gender and
-                        other.age >= other.maturity_age and
-                        other.reproduction_cooldown == 0):
-
+                if (other != animal and 
+                    other.gender != animal.gender and
+                    other.age >= other.maturity_age and
+                    other.reproduction_cooldown == 0):
+                    
                     dist_sq = (animal.rect.centerx - other.rect.centerx) ** 2 + \
                               (animal.rect.centery - other.rect.centery) ** 2
-
+                    
                     if dist_sq < self.params.reproduce_distance ** 2 and dist_sq < min_dist:
                         min_dist = dist_sq
                         mate = other
-
+            
             if mate:
                 self.attempt_reproduction(animal, mate)
 
@@ -544,27 +647,26 @@ class Simulation:
         health_factor = (animal1.health + animal2.health) / 200
         base_prob = self.params.rabbit_reproduce_prob if isinstance(animal1, Rabbit) else self.params.fox_reproduce_prob
         prob = base_prob * health_factor
-
+        
         if random.random() < prob:
             # Reproducción exitosa
-            litter_size_range = self.params.rabbit_litter_size if isinstance(animal1,
-                                                                             Rabbit) else self.params.fox_litter_size
+            litter_size_range = self.params.rabbit_litter_size if isinstance(animal1, Rabbit) else self.params.fox_litter_size
             litter_size = random.randint(*litter_size_range)
-
+            
             group = self.rabbits if isinstance(animal1, Rabbit) else self.foxes
             max_pop = self.params.max_rabbits if isinstance(animal1, Rabbit) else self.params.max_foxes
-
+            
             for _ in range(litter_size):
                 if len(group) < max_pop:
                     x = (animal1.rect.centerx + animal2.rect.centerx) // 2 + random.randint(-10, 10)
                     y = (animal1.rect.centery + animal2.rect.centery) // 2 + random.randint(-10, 10)
                     gender = random.choice(list(Gender))
-
+                    
                     if isinstance(animal1, Rabbit):
                         new_animal = self.add_rabbit(x, y, gender)
                     else:
                         new_animal = self.add_fox(x, y, gender)
-
+                    
                     # Heredar enfermedad si alguno de los padres está enfermo
                     if animal1.sick or animal2.sick:
                         new_animal.sick = True
@@ -573,11 +675,11 @@ class Simulation:
             # Configurar cooldown de reproducción
             animal1.reproduction_cooldown = 100 if isinstance(animal1, Rabbit) else 200
             animal2.reproduction_cooldown = 100 if isinstance(animal2, Rabbit) else 200
-
+            
             # Reducir energía por reproducción
             animal1.energy -= 20
             animal2.energy -= 20
-
+            
             # Contagio de enfermedades
             if animal1.sick and not animal2.sick:
                 animal2.sick = True
@@ -607,7 +709,7 @@ class Simulation:
                     continue
 
                 dist_sq = (rabbit1.rect.centerx - rabbit2.rect.centerx) ** 2 + (
-                        rabbit1.rect.centery - rabbit2.rect.centery) ** 2
+                            rabbit1.rect.centery - rabbit2.rect.centery) ** 2
                 if dist_sq < self.params.reproduce_distance ** 2:
                     # Probabilidad de reproducción afectada por salud
                     prob = self.params.rabbit_reproduce_prob * (health_factor + health_factor2) / 2
@@ -660,21 +762,20 @@ class Simulation:
 
             # Ajustar parámetros según la estación
             if self.season == Season.SPRING:
-                self.params.rabbit_reproduce_prob = 0.1
-                self.params.food_respawn_rate = 5
+                self.params.rabbit_reproduce_prob = self.params.rabbit_reproduce_prob_base*1
+                self.params.food_respawn_rate = self.params.food_respawn_rate_base*5
             elif self.season == Season.SUMMER:
-                self.params.rabbit_reproduce_prob = 0.08
-                self.params.food_respawn_rate = 8
+                self.params.rabbit_reproduce_prob = self.params.rabbit_reproduce_prob_base*8
+                self.params.food_respawn_rate = self.params.food_respawn_rate_base*8
             elif self.season == Season.AUTUMN:
-                self.params.rabbit_reproduce_prob = 0.05
-                self.params.food_respawn_rate = 3
+                self.params.rabbit_reproduce_prob = self.params.rabbit_reproduce_prob_base*5
+                self.params.food_respawn_rate = self.params.food_respawn_rate_base*3
             elif self.season == Season.WINTER:
-                self.params.rabbit_reproduce_prob = 0.02
-                self.params.food_respawn_rate = 1
+                self.params.rabbit_reproduce_prob = self.params.rabbit_reproduce_prob_base*2
+                self.params.food_respawn_rate = self.params.food_respawn_rate_base*1
         if season_changed:
             for animal in list(self.rabbits) + list(self.foxes):
                 animal.check_season_sickness(season_changed)
-
     def update_day_night_cycle(self):
         self.day_night_cycle = (self.day_night_cycle + 0.5) % 360
         night_light = max(0.3, math.sin(math.radians(self.day_night_cycle)) * 0.7 + 0.3)
@@ -699,7 +800,7 @@ class Simulation:
                     continue
 
                 dist_sq = (rabbit1.rect.centerx - rabbit2.rect.centerx) ** 2 + (
-                        rabbit1.rect.centery - rabbit2.rect.centery) ** 2
+                            rabbit1.rect.centery - rabbit2.rect.centery) ** 2
                 if dist_sq < self.params.reproduce_distance ** 2:
                     if random.random() < self.params.rabbit_reproduce_prob:
                         litter_size = random.randint(*self.params.rabbit_litter_size)
@@ -797,13 +898,13 @@ class Simulation:
 
     def draw_stats(self):
         # Fondo semitransparente para los textos
-        s = pygame.Surface((300, 150), pygame.SRCALPHA)
+        s = pygame.Surface((300, 280), pygame.SRCALPHA)
         s.fill((0, 0, 0, 128))
         self.screen.blit(s, (10, 10))
-
+    
         # Textos informativos
         texts = [
-            f"Conejos: {len(self.rabbits)}",
+            f"Cones: {len(self.rabbits)}",
             f"Zorros: {len(self.foxes)}",
             f"Comida: {len(self.foods)}",
             f"Estación: {self.season.name}",
@@ -813,60 +914,71 @@ class Simulation:
             "[R] Reiniciar  [+/-] Velocidad",
             "Click: Añadir conejo/zorro/comida"
         ]
-
+    
         for i, text in enumerate(texts):
             text_surface = FONT.render(text, True, WHITE)
             self.screen.blit(text_surface, (20, 20 + i * 20))
+    
+        self.lcg_button_rect = pygame.Rect(20, 200, 200, 40)
+        self.msq_button_rect = pygame.Rect(20, 240, 200, 40)
+
+        # Botón para pruebas LCG
+        pygame.draw.rect(self.screen, (70, 180, 70), self.lcg_button_rect)
+        lcg_text = FONT.render("Pruebas LCG", True, WHITE)
+        self.screen.blit(lcg_text, (self.lcg_button_rect.x + 10, self.lcg_button_rect.y + 10))
+
+        # Botón para pruebas MiddleSquare
+        pygame.draw.rect(self.screen, (180, 70, 70), self.msq_button_rect)
+        msq_text = FONT.render("Pruebas MiddleSquare", True, WHITE)
+        self.screen.blit(msq_text, (self.msq_button_rect.x + 10, self.msq_button_rect.y + 10))
+
 
         # Gráfico de población
         if len(self.rabbit_pop_history) > 10:
             graph_width, graph_height = 280, 100
             graph_x, graph_y = WIDTH - graph_width - 20, 20
-
+    
             # Fondo del gráfico
             s = pygame.Surface((graph_width, graph_height), pygame.SRCALPHA)
             s.fill((0, 0, 0, 128))
             self.screen.blit(s, (graph_x, graph_y))
-
-            # Escalar datos para que quepan en el gráfico
+    
             max_pop = max(max(self.rabbit_pop_history), max(self.fox_pop_history), max(self.food_pop_history), 1)
-
-            # Dibujar líneas de referencia
+    
             for i in range(0, max_pop + 1, max(1, max_pop // 5)):
                 y_pos = graph_y + graph_height - (i / max_pop) * graph_height
                 pygame.draw.line(self.screen, (100, 100, 100, 150),
                                  (graph_x, y_pos), (graph_x + graph_width, y_pos), 1)
                 text = FONT.render(str(i), True, WHITE)
                 self.screen.blit(text, (graph_x - 25, y_pos - 8))
-
-            # Dibujar las series
+    
             points_r = []
             points_f = []
             points_food = []
-
+    
             for i in range(len(self.rabbit_pop_history)):
                 x = graph_x + (i / len(self.rabbit_pop_history)) * graph_width
                 y_r = graph_y + graph_height - (self.rabbit_pop_history[i] / max_pop) * graph_height
                 y_f = graph_y + graph_height - (self.fox_pop_history[i] / max_pop) * graph_height
                 y_food = graph_y + graph_height - (self.food_pop_history[i] / max_pop) * graph_height
-
+    
                 points_r.append((x, y_r))
                 points_f.append((x, y_f))
                 points_food.append((x, y_food))
-
+    
             if len(points_r) > 1:
                 pygame.draw.lines(self.screen, YELLOW, False, points_r, 2)
                 pygame.draw.lines(self.screen, RED, False, points_f, 2)
                 pygame.draw.lines(self.screen, GREEN, False, points_food, 2)
-
-            # Leyenda
+    
             pygame.draw.rect(self.screen, YELLOW, (graph_x + 10, graph_y + 10, 10, 10))
             pygame.draw.rect(self.screen, RED, (graph_x + 10, graph_y + 30, 10, 10))
             pygame.draw.rect(self.screen, GREEN, (graph_x + 10, graph_y + 50, 10, 10))
-
-            self.screen.blit(FONT.render("Conejos", True, WHITE), (graph_x + 25, graph_y + 8))
+    
+            self.screen.blit(FONT.render("Cones", True, WHITE), (graph_x + 25, graph_y + 8))
             self.screen.blit(FONT.render("Zorros", True, WHITE), (graph_x + 25, graph_y + 28))
             self.screen.blit(FONT.render("Comida", True, WHITE), (graph_x + 25, graph_y + 48))
+    
 
     def draw_environment(self):
         # Fondo con gradiente según la estación
@@ -931,6 +1043,170 @@ class Simulation:
         pygame.quit()
 
 
+import pygame
+import sys
+from pygame.locals import *
+
+class StartScreen:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.screen = pygame.display.set_mode((width, height))
+        pygame.display.set_caption("Simulación Ecosistema - Configuración Inicial")
+
+        # Fuentes
+        self.title_font = pygame.font.SysFont('Arial', 40)
+        self.label_font = pygame.font.SysFont('Arial', 24)
+        self.button_font = pygame.font.SysFont('Arial', 28)
+
+        # Colores
+        self.background = (240, 240, 240)
+        self.title_color = (50, 50, 150)
+        self.label_color = (70, 70, 70)
+        self.button_color = (100, 200, 100)
+        self.button_hover = (120, 220, 120)
+        self.input_bg = (255, 255, 255)
+        self.input_border = (200, 200, 200)
+        self.input_text = (0, 0, 0)
+
+        # Parámetros configurables
+        self.params = {
+            "initial_rabbits": 50,
+            "initial_foxes": 6,
+            "initial_food": 100,
+            "rabbit_speed": 1.5,
+            "fox_speed": 2.2,
+            "food_respawn_rate": 2,
+            "max_rabbits": 300,
+            "max_foxes": 50
+        }
+
+        # Elementos de la interfaz
+        self.input_rects = {}
+        self.active_input = None
+        self.start_button = pygame.Rect(width//2 - 100, height - 80, 200, 50)
+
+    def draw_input_field(self, label, value, y_pos, param_name):
+        # Dibuja etiqueta
+        label_surface = self.label_font.render(label, True, self.label_color)
+        self.screen.blit(label_surface, (50, y_pos))
+
+        # Dibuja campo de entrada
+        input_rect = pygame.Rect(300, y_pos, 150, 30)
+        self.input_rects[param_name] = input_rect
+
+        # Resalta el campo activo
+        if self.active_input == param_name:
+            border_color = (0, 120, 215)
+        else:
+            border_color = self.input_border
+
+        pygame.draw.rect(self.screen, border_color, input_rect, 2)
+        pygame.draw.rect(self.screen, self.input_bg, input_rect.inflate(-4, -4))
+
+        # Dibuja el valor
+        value_surface = self.label_font.render(str(value), True, self.input_text)
+        self.screen.blit(value_surface, (input_rect.x + 10, input_rect.y + 5))
+
+    def draw(self):
+        self.screen.fill(self.background)
+
+        # Título
+        title = self.title_font.render("Configuración de la Simulación", True, self.title_color)
+        self.screen.blit(title, (self.width//2 - title.get_width()//2, 30))
+
+        # Campos de entrada
+        y_pos = 100
+        self.draw_input_field("Conejos iniciales:", self.params["initial_rabbits"], y_pos, "initial_rabbits")
+        y_pos += 50
+        self.draw_input_field("Zorros iniciales:", self.params["initial_foxes"], y_pos, "initial_foxes")
+        y_pos += 50
+        self.draw_input_field("Comida inicial:", self.params["initial_food"], y_pos, "initial_food")
+        y_pos += 50
+        self.draw_input_field("Velocidad conejos:", self.params["rabbit_speed"], y_pos, "rabbit_speed")
+        y_pos += 50
+        self.draw_input_field("Velocidad zorros:", self.params["fox_speed"], y_pos, "fox_speed")
+        y_pos += 50
+        self.draw_input_field("Tasa de comida:", self.params["food_respawn_rate"], y_pos, "food_respawn_rate")
+        y_pos += 50
+        self.draw_input_field("Máx. conejos:", self.params["max_rabbits"], y_pos, "max_rabbits")
+        y_pos += 50
+        self.draw_input_field("Máx. zorros:", self.params["max_foxes"], y_pos, "max_foxes")
+
+        # Botón de inicio
+        button_color = self.button_hover if self.start_button.collidepoint(pygame.mouse.get_pos()) else self.button_color
+        pygame.draw.rect(self.screen, button_color, self.start_button, border_radius=5)
+        start_text = self.button_font.render("Iniciar Simulación", True, (255, 255, 255))
+        self.screen.blit(start_text, (self.start_button.x + self.start_button.width//2 - start_text.get_width()//2,
+                                     self.start_button.y + self.start_button.height//2 - start_text.get_height()//2))
+
+        pygame.display.flip()
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+
+            elif event.type == MOUSEBUTTONDOWN:
+                if event.button == 1:  # Click izquierdo
+                    # Verificar clic en campos de entrada
+                    self.active_input = None
+                    for param_name, rect in self.input_rects.items():
+                        if rect.collidepoint(event.pos):
+                            self.active_input = param_name
+                            break
+
+                    # Verificar clic en botón de inicio
+                    if self.start_button.collidepoint(event.pos):
+                        return self.params  # Devuelve los parámetros configurados
+
+            elif event.type == KEYDOWN:
+                if self.active_input:
+                    # Manejar entrada de texto
+                    if event.key == K_RETURN:
+                        self.active_input = None
+                    elif event.key == K_BACKSPACE:
+                        current = str(self.params[self.active_input])
+                        self.params[self.active_input] = current[:-1] if len(current) > 1 else 0
+                    else:
+                        # Solo permitir números y punto decimal
+                        if event.unicode.isdigit() or (event.unicode == '.' and '.' not in str(self.params[self.active_input])):
+                            current = str(self.params[self.active_input])
+                            if current == '0':
+                                self.params[self.active_input] = event.unicode
+                            else:
+                                self.params[self.active_input] = current + event.unicode
+
+                            # Convertir a int o float según corresponda
+                            try:
+                                if '.' in str(self.params[self.active_input]):
+                                    self.params[self.active_input] = float(self.params[self.active_input])
+                                else:
+                                    self.params[self.active_input] = int(self.params[self.active_input])
+                            except ValueError:
+                                self.params[self.active_input] = 0
+
+        return None
+
+def show_start_screen():
+    pygame.init()
+    start_screen = StartScreen(800, 600)
+
+    while True:
+        params = start_screen.handle_events()
+        if params is not None:
+            # No llamar a pygame.quit() aquí, solo retornar los parámetros
+            return params
+
+        start_screen.draw()
+        pygame.time.Clock().tick(30)
+
+# Modificación en el main para usar la pantalla de inicio
 if __name__ == "__main__":
-    sim = Simulation()
+    # Mostrar pantalla de inicio y obtener parámetros
+    initial_params = show_start_screen()
+
+    # Iniciar simulación con los parámetros configurados
+    sim = Simulation(initial_params)
     sim.run()
