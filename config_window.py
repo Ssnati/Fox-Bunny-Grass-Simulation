@@ -6,6 +6,7 @@ import os
 class ConfigWindow:
     def __init__(self, default_params):
         self.root = tk.Tk()
+        self.default_params = default_params.copy()  # Guardar los valores por defecto
         self.root.title("Configuración de la Simulación")
         self.root.geometry("500x600")
         self.root.resizable(False, False)
@@ -32,6 +33,16 @@ class ConfigWindow:
                       font=('Arial', 10, 'bold'),
                       padding=10)  # Añadir padding para mejor apariencia
                       
+        style.configure('Reset.TButton',
+                      font=('Segoe UI Emoji', 12),  # Fuente que soporta emojis
+                      padding=2,
+                      relief='flat',
+                      borderwidth=0)
+                      
+        style.map('Reset.TButton',
+                background=[('active', '#e0e0e0')],  # Gris claro al pasar el ratón
+                relief=[('active', 'raised')])
+                      
         style.map('Start.TButton',
                 background=[('active', '#c8e6c9')])  # Verde un poco más oscuro al pasar el ratón
                 
@@ -57,13 +68,31 @@ class ConfigWindow:
         canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
+        # Frame para el título y el botón de reinicio
+        title_frame = ttk.Frame(self.scrollable_frame)
+        title_frame.pack(fill=tk.X, pady=(0, 20))
+        
         # Título
         title_label = ttk.Label(
-            self.scrollable_frame,
+            title_frame,
             text="Configuración de la Simulación",
             font=('Arial', 14, 'bold')
         )
-        title_label.pack(pady=(0, 20))
+        title_label.pack(side=tk.LEFT)
+        
+        # Botón de reinicio
+        self.reset_icon = "🔄"  # Símbolo de flecha circular
+        self.reset_btn = ttk.Button(
+            title_frame,
+            text=self.reset_icon,
+            command=self.reset_to_default,
+            style='Reset.TButton',
+            width=3
+        )
+        self.reset_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # Tooltip para el botón de reinicio
+        self.create_tooltip(self.reset_btn, "Restablecer todos los valores por defecto")
         
         # Crear campos de entrada
         self.create_input_fields()
@@ -129,47 +158,26 @@ class ConfigWindow:
             label = ttk.Label(frame, text=label_text, width=20, anchor='e')
             label.pack(side=tk.LEFT, padx=5)
             
-            if param_type == "int":
-                validate_cmd = (frame.register(self.validate_int), '%P', str(min_val), str(max_val))
-                entry = ttk.Entry(frame, validate="key")
-                entry.configure(validatecommand=validate_cmd)
-            else:  # float
-                validate_cmd = (frame.register(self.validate_float), '%P', str(min_val), str(max_val))
-                entry = ttk.Entry(frame, validate="key")
-                entry.configure(validatecommand=validate_cmd)
+            entry = ttk.Entry(frame)
             
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
             entry.insert(0, str(self.params[param_name]))
             
-            # Añadir tooltip con el rango permitido
-            tooltip = f"Rango: {min_val} - {max_val}"
+            # Añadir tooltip con el rango recomendado
+            tooltip = f"Rango recomendado: {min_val} a {max_val}"
             self.create_tooltip(entry, tooltip)
             
             self.entries[param_name] = (entry, param_type)
     
     @staticmethod
     def validate_int(value, min_val, max_val):
-        if value == "":
-            return True
-        try:
-            min_val = int(min_val)
-            max_val = int(max_val)
-            num = int(value)
-            return min_val <= num <= max_val
-        except (ValueError, TypeError):
-            return False
+        """Método de validación para enteros (ya no se usa para validar entrada)"""
+        return True
     
     @staticmethod
     def validate_float(value, min_val, max_val):
-        if value == "" or value == ".":
-            return True
-        try:
-            min_val = float(min_val)
-            max_val = float(max_val)
-            num = float(value)
-            return min_val <= num <= max_val
-        except (ValueError, TypeError):
-            return False
+        """Método de validación para decimales (ya no se usa para validar entrada)"""
+        return True
     
     def create_tooltip(self, widget, text):
         tooltip = None
@@ -254,6 +262,13 @@ class ConfigWindow:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.mainloop()
         return self.params
+        
+    def reset_to_default(self):
+        # Restablecer todos los campos a los valores por defecto
+        for param_name, (entry, param_type) in self.entries.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, str(self.default_params[param_name]))
+            entry.config(style='TEntry')
         
     def on_close(self, event=None):
         # Guardar la configuración y cerrar
