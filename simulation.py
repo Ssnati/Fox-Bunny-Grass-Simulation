@@ -143,12 +143,12 @@ class Animal(pygame.sprite.Sprite):
     def speed(self):
         """Velocidad afectada por la salud"""
         if self.health <= 30:
-            return self.base_speed * 0.5
+            return self.base_speed * 0.9  # 90% de velocidad
         elif self.health <= 50:
-            return self.base_speed * 0.7
+            return self.base_speed * 0.93  # 93% de velocidad
         elif self.health <= 80:
-            return self.base_speed * 0.9
-        return self.base_speed
+            return self.base_speed * 0.95  # 95% de velocidad
+        return self.base_speed  # 100% de velocidad
 
     def rotate_towards_direction(self):
         if self.direction[0] != 0 or self.direction[1] != 0:
