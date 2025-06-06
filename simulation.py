@@ -882,7 +882,7 @@ class Simulation:
 
         # Textos informativos
         texts = [
-            f"Cones: {len(self.rabbits)}",
+            f"Conejos: {len(self.rabbits)}",
             f"Zorros: {len(self.foxes)}",
             f"Comida: {len(self.foods)}",
             f"Estación: {self.season.name}",
@@ -952,7 +952,7 @@ class Simulation:
             pygame.draw.rect(self.screen, RED, (graph_x + 10, graph_y + 30, 10, 10))
             pygame.draw.rect(self.screen, GREEN, (graph_x + 10, graph_y + 50, 10, 10))
 
-            self.screen.blit(FONT.render("Cones", True, WHITE), (graph_x + 25, graph_y + 8))
+            self.screen.blit(FONT.render("Conejos", True, WHITE), (graph_x + 25, graph_y + 8))
             self.screen.blit(FONT.render("Zorros", True, WHITE), (graph_x + 25, graph_y + 28))
             self.screen.blit(FONT.render("Comida", True, WHITE), (graph_x + 25, graph_y + 48))
 
